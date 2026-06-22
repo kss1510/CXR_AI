@@ -19,7 +19,6 @@ public class KnowledgeAssistantWindow : EditorWindow
     private const string API_URL =
         "http://172.17.31.36:8000/query";
 
-    private bool sendToBackend = true;
     [MenuItem("Tools/Knowledge Assistant")]
     public static void ShowWindow()
     {
@@ -45,11 +44,7 @@ public class KnowledgeAssistantWindow : EditorWindow
 
         GUILayout.Space(5);
 
-        sendToBackend =
-            EditorGUILayout.Toggle(
-                "Send To Backend",
-                sendToBackend
-            );
+        
 
         GUILayout.Space(5);
 
@@ -71,7 +66,18 @@ public class KnowledgeAssistantWindow : EditorWindow
 
         GUILayout.Space(10);
 
-        if (GUILayout.Button("Save Entry", GUILayout.Height(30)))
+        GUILayout.Box(
+            "",
+            GUILayout.ExpandWidth(true),
+            GUILayout.Height(1)
+        );
+
+        GUILayout.Space(10);
+
+        if (GUILayout.Button(
+            "Save Entry",
+            GUILayout.Height(35)
+        ))
         {
             SaveEntry();
         }
@@ -130,10 +136,7 @@ public class KnowledgeAssistantWindow : EditorWindow
             "Knowledge Entry Saved Successfully"
         );
 
-        if (sendToBackend)
-        {
-            SendEntryToBackend(newEntry);
-        }
+        SendEntryToBackend(newEntry);
 
         // CLEAR FORM
         entryTitle = "";
@@ -234,13 +237,7 @@ public class KnowledgeAssistantWindow : EditorWindow
         }
     }
 
-    // =========================================
-    // GENERATE UNIQUE ID
-    // =========================================
-    string GenerateID(int count)
-    {
-        return $"KB-{(count + 1).ToString("D4")}";
-    }
+    
 
     // =========================================
     // ENTRY MODEL
