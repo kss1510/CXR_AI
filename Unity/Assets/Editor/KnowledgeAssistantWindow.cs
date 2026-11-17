@@ -16,8 +16,7 @@ public class KnowledgeAssistantWindow : EditorWindow
     private string solution = "";
     private string codeSnippet = "";
     private string filePath;
-    private const string API_URL =
-        "http://172.17.31.36:8000/query";
+    private const string API_URL = "http://127.0.0.1:8000/query";
 
     [MenuItem("Tools/Knowledge Assistant")]
     public static void ShowWindow()
@@ -32,7 +31,15 @@ public class KnowledgeAssistantWindow : EditorWindow
 
     private void OnGUI()
     {
-        GUILayout.Label("Knowledge Entry Form", EditorStyles.boldLabel);
+        GUILayout.Label(
+            "AI Knowledge Assistant",
+            EditorStyles.boldLabel
+        );
+
+        GUILayout.Label(
+            "Create and synchronize knowledge entries with the AI backend.",
+            EditorStyles.wordWrappedMiniLabel
+        );
 
         GUILayout.Space(5);
 
@@ -76,7 +83,7 @@ public class KnowledgeAssistantWindow : EditorWindow
 
         if (GUILayout.Button(
             "Save Entry",
-            GUILayout.Height(35)
+            GUILayout.Height(40)
         ))
         {
             SaveEntry();

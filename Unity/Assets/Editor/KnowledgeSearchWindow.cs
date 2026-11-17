@@ -1,9 +1,10 @@
-﻿using UnityEngine.Networking;
-using System.Text;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Networking;
 
 public class KnowledgeSearchWindow : EditorWindow
 {
@@ -42,7 +43,7 @@ public class KnowledgeSearchWindow : EditorWindow
     private Vector2 mainScrollPosition;
     private GUIStyle richLabelStyle;
     private bool isSearching = false;
-    private string backendStatus = "Ready";
+    private string backendStatus = "Connected";
     private string backendErrorMessage = "";
     private string lastSynced = "Never";
     [MenuItem("Tools/Knowledge Search")]
@@ -98,7 +99,7 @@ public class KnowledgeSearchWindow : EditorWindow
 
         searchQuery = EditorGUILayout.TextField(
             searchQuery,
-            GUILayout.Height(28),
+            GUILayout.Height(32),
             GUILayout.ExpandWidth(true)
         );
         GUILayout.Space(10);
@@ -212,7 +213,7 @@ public class KnowledgeSearchWindow : EditorWindow
             searchQuery = "";
             searchResults.Clear();
             backendErrorMessage = "";
-            backendStatus = "Ready";
+            backendStatus = "Connected";
             ragQuestion = "";
             ragAnswer = "";
         }
@@ -262,7 +263,7 @@ public class KnowledgeSearchWindow : EditorWindow
         GUILayout.Space(10);
 
         GUILayout.Label(
-            $"Search Results ({searchResults.Count})",
+            $"Knowledge Results ({searchResults.Count})",
             EditorStyles.boldLabel
         );
         GUILayout.Space(5);
@@ -338,7 +339,7 @@ public class KnowledgeSearchWindow : EditorWindow
         if (searchResults.Count == 0)
         {
             EditorGUILayout.HelpBox(
-                "No search results found.",
+                "No matching knowledge entries found.",
                 MessageType.Info
             );
         }
@@ -350,7 +351,9 @@ public class KnowledgeSearchWindow : EditorWindow
                     GUILayout.Height(400)
                 );
 
-            foreach (var entry in searchResults)
+            // Iterate over a snapshot because an asynchronous delete can
+            // update searchResults while this GUI is being drawn.
+            foreach (var entry in searchResults.ToArray())
             {
                 DrawEntry(entry);
             }
@@ -424,7 +427,7 @@ public class KnowledgeSearchWindow : EditorWindow
 
         UnityWebRequest webRequest =
             new UnityWebRequest(
-                "http://172.17.31.36:8000/search",
+                "http://127.0.0.1:8000/search",
                 "POST"
             );
 
@@ -481,7 +484,10 @@ public class KnowledgeSearchWindow : EditorWindow
                     ragAnswer =
                         parsedResponse.rag_response.answer;
                 }
+                backendStatus = "Connected";
 
+                lastSynced = "-";
+                    DateTime.Now.ToString("HH:mm:ss");
                 Repaint();
 
                 Debug.Log(
@@ -502,7 +508,7 @@ public class KnowledgeSearchWindow : EditorWindow
             );
             backendStatus = "Offline";
             backendErrorMessage =
-                "Backend unavailable";
+                "Unable to connect to AI Backend.";
         }
         isSearching = false;
         Repaint();
@@ -741,45 +747,138 @@ public class KnowledgeSearchWindow : EditorWindow
         GUILayout.Space(8);
     }
 
-    void DeleteEntry(int entryID)
+    async void DeleteEntry(int entryID)
     {
-
-        if (!File.Exists(filePath))
-        {
-            Debug.LogError("knowledge.json not found");
-            return;
-        }
-
-        string json = File.ReadAllText(filePath);
-
-        Wrapper data =
-            JsonUtility.FromJson<Wrapper>(json);
-
-        if (data == null || data.entries == null)
-        {
-            Debug.LogError("No entries found");
-            return;
-        }
-
-        // REMOVE ENTRY
-        data.entries.RemoveAll(
-            entry => entry.id == entryID
+        bool confirm = EditorUtility.DisplayDialog(
+            "Delete Knowledge Entry",
+            $"Are you sure you want to delete entry {entryID}?",
+            "Delete",
+            "Cancel"
         );
 
-        // SAVE UPDATED JSON
-        string updatedJson =
-            JsonUtility.ToJson(data, true);
+        if (!confirm)
+        {
+            return;
+        }
 
-        File.WriteAllText(filePath, updatedJson);
+        string url =
+            $"http://127.0.0.1:8000/query/{entryID}";
 
-        AssetDatabase.Refresh();
+        // Ask the backend to delete the database record first.
+        using (UnityWebRequest webRequest = UnityWebRequest.Delete(url))
+        {
+            webRequest.downloadHandler =
+                new DownloadHandlerBuffer();
 
-        // REMOVE FROM SEARCH RESULTS
+            try
+            {
+                var operation = webRequest.SendWebRequest();
+
+                while (!operation.isDone)
+                {
+                    await System.Threading.Tasks.Task.Yield();
+                }
+
+                if (webRequest.result != UnityWebRequest.Result.Success)
+                {
+                    Debug.LogError(
+                        "DELETE FAILED:\n" +
+                        "Status Code: " + webRequest.responseCode +
+                        "\nResponse: " +
+                        webRequest.downloadHandler.text
+                    );
+
+                    backendStatus = "Offline";
+                    backendErrorMessage =
+                        "Unable to delete entry from backend. The entry remains in the results.";
+
+                    Repaint();
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError(
+                    "DELETE REQUEST ERROR: " + ex.Message
+                );
+
+                backendStatus = "Offline";
+                backendErrorMessage =
+                    "An error occurred while deleting the entry from the backend.";
+
+                Repaint();
+                return;
+            }
+        }
+
+        // The backend confirmed deletion. Update the local JSON copy if it exists.
+        if (File.Exists(filePath))
+        {
+            try
+            {
+                string json = File.ReadAllText(filePath);
+
+                Wrapper data =
+                    JsonUtility.FromJson<Wrapper>(json);
+
+                if (data != null && data.entries != null)
+                {
+                    data.entries.RemoveAll(
+                        entry => entry.id == entryID
+                    );
+
+                    string updatedJson =
+                        JsonUtility.ToJson(data, true);
+
+                    File.WriteAllText(filePath, updatedJson);
+                    AssetDatabase.Refresh();
+                }
+                else
+                {
+                    Debug.LogWarning(
+                        "Backend deletion succeeded, but local knowledge.json " +
+                        "does not contain a valid entries list."
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                // Do not report the backend deletion as failed because the
+                // database record has already been deleted successfully.
+                Debug.LogWarning(
+                    "Backend deletion succeeded, but local knowledge.json " +
+                    "could not be updated: " + ex.Message
+                );
+            }
+        }
+        else
+        {
+            Debug.LogWarning(
+                "Backend deletion succeeded. Local knowledge.json was not found; " +
+                "the local file was left unchanged."
+            );
+        }
+
+        // Update the UI only after the backend confirms the deletion.
         searchResults.RemoveAll(
             entry => entry.id == entryID
         );
 
-        Debug.Log($"Deleted Entry: {entryID}");
+        expandedEntries.Remove(entryID);
+
+        if (currentlyEditingID == entryID)
+        {
+            currentlyEditingID = -1;
+        }
+
+        backendStatus = "Connected";
+        backendErrorMessage = "";
+
+        Debug.Log(
+            $"Successfully deleted Entry: {entryID} from the backend."
+        );
+
+        Repaint();
     }
     void SaveEditedEntry(Entry updatedEntry)
     {
